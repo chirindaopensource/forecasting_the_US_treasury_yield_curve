@@ -26,7 +26,7 @@
 
 **Repository:** `https://github.com/chirindaopensource/forecasting_the_US_treasury_yield_curve`
 
-**Owner:** 2025 Craig Chirinda (Open Source Projects)
+**Owner:** 2026 Craig Chirinda (Open Source Projects)
 
 This repository contains an **independent**, professional-grade Python implementation of the research methodology from the 2026 paper entitled **"Forecasting the U.S. Treasury Yield Curve: A Distributionally Robust Machine Learning Approach"** by:
 
