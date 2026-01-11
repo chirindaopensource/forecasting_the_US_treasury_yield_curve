@@ -1,0 +1,278 @@
+﻿STUDY_CONFIG = {
+
+    # -------------------------------------------------------------------------
+    # 1. GLOBAL EXPERIMENT SETTINGS
+    # -------------------------------------------------------------------------
+    "Global_Settings": {
+        "start_date_us": "2006-01-31",
+        "end_date_us": "2025-08-31",
+        "start_date_global": "2010-01-31",
+        "frequency": "M",
+
+        # Rolling windows (paper)
+        "dns_fadns_window_w": 60,          # w = 60 months
+        "rf_training_window_W": 60,        # W = 60 months (RF algorithm)
+        "fc_weight_window_W": 24,          # W = 24 months (forecast combination)
+        "fc_min_observations": 5,          # min obs before updating weights
+
+        # Forecast horizons (paper)
+        "forecast_horizons": [1, 3, 6, 9, 12],
+
+        # Canonical U.S. zero-coupon maturities (paper)
+        "us_zero_maturities": [
+            "3M","6M","1Y","2Y","3Y","4Y","5Y","6Y","7Y","8Y","9Y","10Y","15Y","20Y","30Y"
+        ],
+
+        # Required maturity-to-tau mapping for Nelson–Siegel loadings (months)
+        "maturity_to_tau_months": {
+            "3M": 3, "6M": 6, "1Y": 12, "2Y": 24, "3Y": 36, "4Y": 48, "5Y": 60,
+            "6Y": 72, "7Y": 84, "8Y": 96, "9Y": 108, "10Y": 120, "15Y": 180,
+            "20Y": 240, "30Y": 360
+        },
+
+        # Unit conventions needed to match RMSFE tables (bps)
+        "yield_units": "pct_points",       # percent points (e.g., 4.25 means 4.25%)
+        "rmsfe_units": "bps",              # report RMSFE in bps
+        "pct_points_to_bps_multiplier": 100.0
+    },
+
+    # -------------------------------------------------------------------------
+    # 2. RAW DATA INPUTS (CANONICAL SCHEMAS)
+    # -------------------------------------------------------------------------
+    "Raw_Data_Schemas": {
+
+        "US_Zero_Yields": {
+            "type": "pandas.DataFrame",
+            "index": "DatetimeIndex (End-of-Month)",
+            "columns": [
+                "3M","6M","1Y","2Y","3Y","4Y","5Y","6Y","7Y","8Y","9Y","10Y","15Y","20Y","30Y"
+            ],
+            "dtype": "float64 (pct points)"
+        },
+
+        "US_Macro": {
+            "type": "pandas.DataFrame",
+            "index": "DatetimeIndex (End-of-Month)",
+            "n_columns": 111,
+            "mixed_frequency": True,
+            "quarterly_interpolation_required": True
+        },
+
+        "US_Benchmark_Yields": {
+            "type": "pandas.DataFrame",
+            "index": "DatetimeIndex (End-of-Month)",
+            "columns": ["3M","6M","1Y","2Y","3Y","5Y","7Y","10Y","30Y"],
+            "dtype": "float64 (pct points)",
+            "evaluation_start_date": "2010-01-31"
+        },
+
+        "US_TIC": {
+            "type": "pandas.DataFrame",
+            "index": "DatetimeIndex (End-of-Month)",
+            "columns": [
+                "US_TIC_Gross_External_Debt_Position",
+                "US_General_Government_Gross_External_Debt_Position"
+            ],
+            "availability_start_date": "2014-09-30"
+        },
+
+        "Global_10Y_Yields": {
+            "type": "pandas.DataFrame",
+            "index": "DatetimeIndex (End-of-Month)",
+            "columns": ["US_10Y","UK_10Y","Germany_10Y","Japan_10Y","Canada_10Y","China_10Y","Malaysia_10Y"],
+            "dtype": "float64 (pct points)"
+        },
+
+        "Global_Macro_Panels": {
+            "type": "dict[str, pandas.DataFrame]",
+            "required_keys": ["US","UK","Germany","Japan","Canada","China","Malaysia"],
+            "mixed_frequency": True,
+            "quarterly_interpolation_required": True
+        }
+    },
+
+    # -------------------------------------------------------------------------
+    # 3. PREPROCESSING & FEATURE ENGINEERING (PAPER + REQUIRED SPECIFICATIONS)
+    # -------------------------------------------------------------------------
+    "Preprocessing_Params": {
+
+        # A. Structural break detection (paper procedure is explicitly two-stage)
+        "Break_Detection": {
+            "stage_1": {
+                "test": "CUSUM",
+                # Resolved: Standard OLS residuals against constant mean
+                "cusum_model_specification": "OLS_residuals_constant_only",
+                "significance_level": 0.05
+            },
+            "stage_2": {
+                "algorithm": "PELT",
+                "cost_function": "RBF",
+                "penalty_beta": 10,
+                # Resolved: Default RBF kernel from ruptures library
+                "rbf_kernel_setting": "rpt_rbf_default"
+            }
+        },
+
+        # B. Quarterly-to-monthly conversion (paper: linear interpolation)
+        "Quarterly_To_Monthly": {
+            "method": "LinearInterpolation",
+            "anchor": "QuarterEnd",
+            # Resolved: Leave endpoints as NaN to avoid look-ahead bias
+            "endpoint_policy": "nan_at_endpoints"
+        },
+
+        # C. Stationarity filtering for FADNS PCA step (paper: rolling ADF at 10%)
+        "Stationarity_ADF": {
+            "p_value_threshold": 0.10,
+            "regression": "c",               # constant only
+            "max_lag": 12,
+            "autolag": "AIC",
+            "difference_order_if_nonstationary": 1
+        },
+
+        # D. Standardization for PCA (paper: z-score within rolling window)
+        "ZScore_Standardization": {
+            "scope": "Rolling_Window_Only",
+            "center": True,
+            "scale": True
+        },
+
+        # E. PCA (paper: rolling PCA + sign alignment)
+        "PCA": {
+            "k_grid": [1,2,3,4,5,6,7,8,9,10],
+            "sign_alignment": True,
+            "sign_alignment_rule": "flip_if_dot_with_previous_eigenvector_negative"
+        },
+
+        # F. RF feature lags (paper)
+        "Lag_Structure": {
+            "macro_lags": list(range(1, 61)),     # {1,...,60}
+            "yield_lags": list(range(0, 60)),     # {0,...,59}
+            "dW_formula": "60*(p+1)",             # dW = 60(p+1)
+            "expected_p": 111,
+            "expected_dW": 6720
+        }
+    },
+
+    # -------------------------------------------------------------------------
+    # 4. MODEL PARAMETERS (DNS / FADNS / RF)
+    # -------------------------------------------------------------------------
+    "Model_Architectures": {
+
+        "DNS": {
+            "lambda_decay": 0.0609,
+            "var_order": 1,
+            "factor_dimension": 3,
+            "rolling_window_w": 60,
+            "forecast_horizons": [1,3,6,9,12]
+        },
+
+        "FADNS": {
+            "lambda_decay": 0.0609,
+            "var_order": 1,
+            "rolling_window_w": 60,
+            "pca_k_grid": [1,2,3,4,5,6,7,8,9,10],
+            "macro_publication_lag_months": 1
+        },
+
+        "Random_Forest": {
+            "rolling_window_W": 60,
+            "normalization": {
+                # Paper: min-max scaling applied within each rolling training sample
+                "method": "MinMax",
+                "scale_predictors": True,
+                "scale_response": True,
+                "scope": "Rolling_Training_Window_Only"
+            },
+
+            # Paper: 10 independent runs for the main RF table.
+            "n_seeds": 10,
+            # Resolved: Fixed seed list for deterministic replication
+            "rf_seeds_main_required_for_exact_replication": [
+                42, 101, 999, 1234, 5678, 2023, 8888, 777, 314, 2718
+            ],
+            "rf_seeds_benchmark_reported_in_paper": [8270, 1860],
+
+            # CART / RF structural properties (paper)
+            "splitting_criterion": "MSE",
+            "bootstrap": True,
+
+            # Randomized CV tuning
+            "cv": {
+                "method": "RandomizedSearch",
+                "time_series_split": "TimeSeriesBlockingOrTimeSeriesSplit",
+                "n_folds": 5,
+                # Resolved: 50 iterations for robust search
+                "n_iter": 50,
+                "objective": "CV-MSE",
+                # Resolved: Concrete hyperparameter grid
+                "hyperparam_space": {
+                    "n_estimators": [100, 200, 500],
+                    "max_depth": [10, 20, 30, None],
+                    "max_features": ["sqrt", "log2", 0.33],
+                    "min_samples_leaf": [1, 5, 10]
+                }
+            }
+        }
+    },
+
+    # -------------------------------------------------------------------------
+    # 5. FORECAST COMBINATION (METHOD INVENTORY + PARAMETERS)
+    # -------------------------------------------------------------------------
+    "Forecast_Combination": {
+
+        "General": {
+            "rolling_window_W": 24,
+            "min_observations": 5,
+            "simplex_constraint": {"nonnegative": True, "sum_to_one": True}
+        },
+
+        # Explicit method inventory (matches appendix tables)
+        "Methods": [
+            "FC-EW","FC-RANK","FC-RMSE","FC-MSE","FC-OLS","FC-MV","FC-STACK","FC-LAD",
+            "AFTER-Rolling","AFTER-EWMA","AFTER-Simplified",
+            "FC-DRO-ES","FC-DRO-MIX","FC-DRMV"
+        ],
+
+        "FC_OLS": {"screening_fraction": 0.30},
+
+        "FC_MV": {"ridge_lambda": 1e-6},
+
+        "FC_LAD": {"penalty_phi_n": 0.02},
+
+        "AFTER": {
+            "lookback_L": 20,
+            # Resolved: Standard decay factor for financial time series
+            "ewma_decay_lambda": 0.97,
+            "variance_floor": 1e-6
+        },
+
+        "FC_DRO_ES": {"alpha": 0.10, "eta": 5.0},
+
+        "FC_DRMV": {"tau": 0.05},
+
+        "FC_DRO_MIX": {"alpha": 0.10, "lambda_mix": 0.5, "eta": 5.0}
+    },
+
+    # -------------------------------------------------------------------------
+    # 6. INTERPRETABILITY (SHAP)
+    # -------------------------------------------------------------------------
+    "Interpretability": {
+        "SHAP": {
+            "method": "TreeExplainer",
+            "aggregation": "MaturityAveragedMeanAbs",
+            "definition": "GlobalSHAP_j(h,s) = (1/|T|) * sum_{tau in T} E[|phi_j(tau,h,s)|]",
+            # Must specify which RF models/targets/horizons are explained
+            "explain_targets": "ALL_MATURITIES_PER_HORIZON_PER_SEED",
+            "explain_horizons": [1,3,6,9,12]
+        }
+    },
+
+    # -------------------------------------------------------------------------
+    # 7. LLM / PROMPT SETTINGS (NONE IN THIS MANUSCRIPT)
+    # -------------------------------------------------------------------------
+    "LLM_Settings": {
+        "used": False,
+        "prompt_templates": None
+    }
+}
